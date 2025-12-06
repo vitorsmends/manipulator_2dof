@@ -1,0 +1,115 @@
+\documentclass[a4paper, 12pt]{article}
+
+% --- Pacotes Essenciais ---
+\usepackage[utf8]{inputenc}
+\usepackage[portuguese]{babel}
+\usepackage{geometry}
+\usepackage{amsmath} % Pacote principal para matemática
+\usepackage{amssymb} % Para símbolos como \mathbb{R}
+\usepackage{caption}
+
+% --- Configuração de Página ---
+\geometry{a4paper, margin=1in}
+
+% --- Informações do Documento ---
+\title{Formulação da Lei de Controle Cinemático \\
+       para um Manipulador 2-DOF \\
+       \large (Mínimos Quadrados via Pseudoinversa)}
+\author{Gemini}
+\date{\today}
+
+% --- Início do Documento ---
+\begin{document}
+
+\maketitle
+
+\section{Objetivo do Controle}
+O objetivo do código fornecido é implementar um controle de posição em malha fechada. Dado um ponto de referência (alvo) $\mathbf{x}_d \in \mathbb{R}^2$ no espaço cartesiano, a lei de controle deve calcular iterativamente as velocidades de junta $\dot{\mathbf{q}} \in \mathbb{R}^2$ que fazem com que a posição do efetuador final do robô, $\mathbf{x}$, convirja para $\mathbf{x}_d$.
+
+A estratégia utilizada é o \textbf{Controle de Movimento em Taxa Resolvida} (Resolved-Rate Motion Control), que opera no nível de velocidade.
+
+\section{Modelo Cinemático}
+
+\subsection{Cinemática Direta (Posição)}
+A relação não linear entre as posições das juntas $\mathbf{q} = \begin{bmatrix} q_1 \\ q_2 \end{bmatrix}$ e a posição cartesiana do efetuador final $\mathbf{x} = \begin{bmatrix} x \\ y \end{bmatrix}$ é dada pela função de cinemática direta, $f$:
+\[
+\mathbf{x} = f(\mathbf{q})
+\]
+No código, esta função é \texttt{forward\_kinematics(q1, q2)}.
+
+\subsection{Cinemática Diferencial (Velocidade)}
+Para relacionar as velocidades, derivamos a equação acima em relação ao tempo, usando a regra da cadeia:
+\[
+\dot{\mathbf{x}} = \frac{d}{dt} f(\mathbf{q}) = \frac{\partial f(\mathbf{q})}{\partial \mathbf{q}} \frac{d\mathbf{q}}{dt}
+\]
+Isso nos dá a relação fundamental da cinemática diferencial, que envolve a matriz Jacobiana $\mathbf{J}(\mathbf{q})$:
+\begin{equation}
+\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q}) \dot{\mathbf{q}}
+\label{eq:jacobiana}
+\end{equation}
+Onde $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{2 \times 2}$ é a Jacobiana (calculada pela função \texttt{get\_jacobian}) que mapeia as velocidades de junta ($\dot{\mathbf{q}}$) para as velocidades cartesianas ($\dot{\mathbf{x}}$).
+
+\section{Formulação da Lei de Controle}
+A lei de controle implementada é uma combinação de duas etapas, executadas em cada passo da simulação.
+
+\subsection{Etapa 1: Controlador Proporcional no Espaço de Tarefa}
+Primeiro, definimos o erro de posição no espaço de tarefa (cartesiano):
+\begin{equation}
+\mathbf{e} = \mathbf{x}_d - \mathbf{x}
+\label{eq:erro}
+\end{equation}
+Isso corresponde à linha de código: \texttt{error = target\_pos\_robot - current\_pos}.
+
+Para fazer o robô se mover em direção ao alvo, a forma mais simples de controle é definir uma \textbf{velocidade cartesiana desejada}, $\dot{\mathbf{x}}_d$, que seja \textit{proporcional} ao erro. Esta é a lei de um Controlador Proporcional (P):
+\begin{equation}
+\dot{\mathbf{x}}_d = K_p \mathbf{e}
+\label{eq:p_control}
+\end{equation}
+Onde $K_p$ é um ganho escalar positivo (definido como \texttt{KP} no código). Esta lei garante que, se conseguirmos impor $\dot{\mathbf{x}} = \dot{\mathbf{x}}_d$, o erro $\mathbf{e}(t)$ convergirá exponencialmente para zero.
+
+Isso corresponde à linha de código: \texttt{ee\_velocity = error * KP}.
+
+\subsection{Etapa 2: Solução de Cinemática Inversa por Mínimos Quadrados}
+Agora, temos uma velocidade cartesiana desejada ($\dot{\mathbf{x}}_d$) e queremos encontrar as velocidades de junta ($\dot{\mathbf{q}}$) que a produzem. Substituímos $\dot{\mathbf{x}}$ por $\dot{\mathbf{x}}_d$ na Equação \eqref{eq:jacobiana}:
+\[
+\mathbf{J}(\mathbf{q}) \dot{\mathbf{q}} = \dot{\mathbf{x}}_d
+\]
+Nosso objetivo é resolver para $\dot{\mathbf{q}}$. Este é um sistema de equações lineares. O método de \textbf{Mínimos Quadrados}, solicitado na formulação, busca encontrar o vetor $\dot{\mathbf{q}}$ que minimiza a norma do erro ao quadrado:
+\begin{equation}
+\min_{\dot{\mathbf{q}}} \left\| \mathbf{J}\dot{\mathbf{q}} - \dot{\mathbf{x}}_d \right\|^2
+\label{eq:least_squares}
+\end{equation}
+A solução analítica para este problema de otimização é dada pela \textbf{Pseudoinversa de Moore-Penrose} da Jacobiana, denotada por $\mathbf{J}^+$:
+\begin{equation}
+\dot{\mathbf{q}} = \mathbf{J}^+ \dot{\mathbf{x}}_d
+\label{eq:pseudoinverse}
+\end{equation}
+No código, esta solução de mínimos quadrados é calculada diretamente pela função \texttt{np.linalg.pinv()}:
+\begin{itemize}
+    \item \texttt{J\_pinv = np.linalg.pinv(J)}
+\end{itemize}
+Esta função calcula $\mathbf{J}^+$ de forma numericamente robusta.
+
+\section{Implementação Discreta e Resumo}
+Combinando as Etapas 1 e 2, a lei de controle completa para a velocidade da junta é:
+\[
+\dot{\mathbf{q}} = \mathbf{J}^+ (K_p (\mathbf{x}_d - \mathbf{x}))
+\]
+No código, esta lei é implementada de forma iterativa (discreta no tempo), onde $k$ é o passo de tempo atual:
+
+\begin{enumerate}
+    \item \textbf{Calcular Posição Atual:} $\mathbf{x}_k = f(\mathbf{q}_k)$
+    \item \textbf{Calcular Erro:} $\mathbf{e}_k = \mathbf{x}_d - \mathbf{x}_k$
+    \item \textbf{Calcular Velocidade Cartesiana Desejada:} $\dot{\mathbf{x}}_d = K_p \mathbf{e}_k$
+    \item \textbf{Calcular Jacobiana:} $\mathbf{J}_k = \mathbf{J}(\mathbf{q}_k)$
+    \item \textbf{Resolver Mínimos Quadrados (Pseudoinversa):} $\dot{\mathbf{q}}_k = \mathbf{J}_k^+ \dot{\mathbf{x}}_d$ \\
+    (\texttt{dq = J\_pinv @ ee\_velocity})
+    \item \textbf{Integrar (Método de Euler):} $\mathbf{q}_{k+1} = \mathbf{q}_k + \dot{\mathbf{q}}_k \cdot \Delta t$ \\
+    (\texttt{q\_current += dq * DT})
+\end{enumerate}
+Este ciclo se repete até que a norma do erro, $|| \mathbf{e}_k ||$, seja menor que a tolerância definida (\texttt{TOLERANCE}).
+
+\subsection{Limitação}
+Esta formulação de Mínimos Quadrados pura, embora matematicamente correta, é suscetível a instabilidades numéricas quando o robô se aproxima de uma \textbf{singularidade} (por exemplo, braço totalmente esticado), onde $\mathbf{J}$ perde posto. Nesses pontos, os valores em $\mathbf{J}^+$ tendem ao infinito, causando "explosões" nas velocidades das juntas $\dot{\mathbf{q}}$.
+
+\end{document}
